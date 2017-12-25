@@ -21,6 +21,7 @@
 #define max(X,Y) ((X) > (Y) ? (X) : (Y))
 
 int proxy_IP[4];
+int rate;
 
 int connect_FTP(int ser_port, int clifd);
 int proxy_func(int ser_port, int clifd, int rate);
@@ -32,13 +33,15 @@ int main (int argc, char **argv) {
     pid_t childpid;
     socklen_t clilen;
     struct sockaddr_in cliaddr;
-    if (argc < 3) {
-        printf("[v] Usage: ./executableFile <ProxyIP> <ProxyPort> \n");
+    if (argc < 4) {
+        printf("[v] Usage: ./executableFile <ProxyIP> <ProxyPort> <rate> \n");
         return -1;
     }
 
     sscanf(argv[1], " %d.%d.%d.%d", &proxy_IP[0], &proxy_IP[1], &proxy_IP[2], &proxy_IP[3]);
     port = atoi(argv[2]);
+		rate = atoi(argv[3]);
+		printf("rate:%d", rate);
 
     ctrlfd = create_server(port);
     clilen = sizeof(struct sockaddr_in);
