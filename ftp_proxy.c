@@ -14,6 +14,8 @@
 #include <dirent.h>
 #include <arpa/inet.h>
 
+#include <sys/time.h>	// High precition clocl
+
 #define MAXSIZE 2048
 #define FTP_PORT 8740
 #define FTP_PASV_CODE 227
@@ -21,18 +23,19 @@
 #define max(X,Y) ((X) > (Y) ? (X) : (Y))
 
 int proxy_IP[4];
-int rate;
 
 int connect_FTP(int ser_port, int clifd);
-int proxy_func(int ser_port, int clifd, int rate);
+int proxy_func(int ser_port, int clifd, double rate);
 int create_server(int port);
-void rate_control();
+void rate_control(struct timeval start_time, struct timeval current_time, unsigned long total_send_bytes, double rate);
 
 int main (int argc, char **argv) {
-    int ctrlfd, connfd, port, rate = 0;
+    int ctrlfd, connfd, port, send_bytes = 0;
+	int first_send = 1;
     pid_t childpid;
     socklen_t clilen;
     struct sockaddr_in cliaddr;
+	double rate;
     if (argc < 4) {
         printf("[v] Usage: ./executableFile <ProxyIP> <ProxyPort> <rate> \n");
         return -1;
@@ -40,12 +43,13 @@ int main (int argc, char **argv) {
 
     sscanf(argv[1], " %d.%d.%d.%d", &proxy_IP[0], &proxy_IP[1], &proxy_IP[2], &proxy_IP[3]);
     port = atoi(argv[2]);
-		rate = atoi(argv[3]);
-		printf("rate:%d", rate);
+	rate = atoi(argv[3]);
 
     ctrlfd = create_server(port);
     clilen = sizeof(struct sockaddr_in);
     for (;;) {
+		printf("...Waiting for connection...\n");
+		fflush(stdout);
         connfd = accept(ctrlfd, (struct sockaddr *)&cliaddr, &clilen);
         if (connfd < 0) {
             printf("[x] Accept failed\n");
@@ -106,15 +110,19 @@ int connect_FTP(int ser_port, int clifd) {
     return sockfd;
 }
 
-int proxy_func(int ser_port, int clifd, int rate) {
+int proxy_func(int ser_port, int clifd, double rate){
     char buffer[MAXSIZE];
     int serfd = -1, datafd = -1, connfd;
     int data_port;
-    int byte_num;
+    int byte_num = 0;
     int status, pasv[7];
     int childpid;
     socklen_t clilen;
     struct sockaddr_in cliaddr;
+	struct timeval start_time, current_time;
+
+	unsigned long total_upload_bytes = 0;
+	unsigned long total_download_bytes = 0;
 
     // select vars
     int maxfdp1;
@@ -143,6 +151,11 @@ int proxy_func(int ser_port, int clifd, int rate) {
         // select descriptor
         nready = select(maxfdp1, &rset, NULL, NULL, NULL);
         if (nready > 0) {
+			if(!byte_num){
+				// 1st time transfering bytes
+				gettimeofday(&start_time, NULL);
+				//first_send = 0;
+			}
             // check FTP client socket fd
             if (FD_ISSET(clifd, &rset)) {
                 memset(buffer, 0, MAXSIZE);
@@ -156,6 +169,10 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     printf("[x] Write to server failed.\n");
                     break;
                 }
+			
+				gettimeofday(&current_time, NULL);
+				total_upload_bytes += byte_num;
+				rate_control(start_time, current_time, total_upload_bytes, rate);
             }
 
             // check FTP server socket fd
@@ -199,6 +216,10 @@ int proxy_func(int ser_port, int clifd, int rate) {
                     printf("[x] Write to client failed.\n");
                     break;
                 }
+
+				gettimeofday(&current_time, NULL);
+				total_download_bytes += byte_num;
+				rate_control(start_time, current_time, total_download_bytes, rate);
             }
         } else {
             printf("[x] Select() returns -1. ERROR!\n");
@@ -212,7 +233,11 @@ int create_server(int port) {
     int listenfd;
     struct sockaddr_in servaddr;
 
+	int reuseaddr = 1;
     listenfd = socket(AF_INET, SOCK_STREAM, 0);
+
+	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(int));
+
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -227,9 +252,19 @@ int create_server(int port) {
     return listenfd;
 }
 
-void rate_control() {
+void rate_control(struct timeval start_time, struct timeval current_time, unsigned long total_send_bytes, double rate) {
     /**
      * Implement your main logic of rate control here.
      * Add return variable or parameters you need.
      * **/
+
+	// Real elapsed time from the beginning in us
+	double elapsed_time = (current_time.tv_usec - start_time.tv_usec) + (current_time.tv_sec - start_time.tv_sec) * 1000000.0;
+	// Ideal elapsed time from the beginning in us
+	double time = rate * 1024 / 1000000;
+	double ideal_elapsed_time = (double)total_send_bytes /  time;
+	
+	if(ideal_elapsed_time - elapsed_time > 0)
+		usleep(ideal_elapsed_time - elapsed_time);
+		
 }
