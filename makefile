@@ -1,2 +1,2 @@
-all:ftp_proxy.c
-	gcc -g ftp_proxy.c -o ftp_proxy
+all:28.c
+	gcc -g 28.c -o ftp_proxy
